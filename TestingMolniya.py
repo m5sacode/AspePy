@@ -7,10 +7,10 @@ import matplotlib.pyplot as plt
 # AI testing code
 
 
-n_sats = 5
-url = "https://celestrak.org/NORAD/elements/gp.php?NAME=MOLNIYA 3&FORMAT=TLE"
+n_sats = 3
+url = "https://celestrak.org/NORAD/elements/gp.php?NAME=MOLNIYA&FORMAT=TLE"
 
-response = requests.get(url, timeout=20)
+response = requests.get(url, timeout=30)
 response.raise_for_status()
 tle_text = response.text.strip()
 
@@ -137,6 +137,7 @@ for i, (name, orbit) in enumerate(orbits):
         show=False,
         ax=ax,
         plot_body=(i == 0),
+        time=0,
         color=colors[i % len(colors)]
     )
 

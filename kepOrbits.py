@@ -2,6 +2,8 @@ import numpy as np
 import consts as csts
 import matplotlib.pyplot as plt
 import matplotlib as mpl
+from scipy.optimize import brentq
+
 mpl.use('TkAgg')
 
 class Body():
@@ -33,27 +35,132 @@ class Orbit():
 
         self.p = (self.H_mag**2)/self.mu
 
-        self.rp_mag = self.get_r_mag(0)
-        self.ra_mag = self.get_r_mag(np.pi)
+        self.rp_mag = self.get_r_mag_from_theta(0)
+        self.ra_mag = self.get_r_mag_from_theta(np.pi)
+
+        self.a = (self.rp_mag + self.ra_mag) /2
 
         self.rp = self.rp_mag * self.rp_unit
         self.ra = self.ra_mag * self.rp_unit * -1
+
+        if self.e_mag < 1 and self.e_mag > 0:  # Ellipse
+            self.T = 2*np.pi*np.sqrt((self.a**3)/self.mu)
+            self.n = 2*np.pi/self.T
+        elif self.e_mag > 1:
+            self.n_bar = np.sqrt(self.mu/(-self.a**3))
+            self.T = np.inf
 
 
         self.r0 = r0
         self.v0 = v0
         self.t0 = t0
 
+        self.tp_first = self.get_tp_from_r_v(r0,v0)
+
+
     def get_r_mag_from_theta(self, theta):
         r_mag = self.p/(1+self.e_mag*np.cos(theta))
         return r_mag
+
+    def get_theta_from_r_v(self, r, v):
+        r_mag = np.linalg.norm(r)
+        v_radial = np.dot(r, v)/r_mag
+        theta = self.get_theta_from_r_mag(r_mag)
+        if v_radial < 0:
+            theta *= -1
+        return theta
 
     def get_theta_from_r_mag(self, r_mag):
         theta = np.arccos(((self.p/r_mag)-1)/self.e_mag)
         return theta
 
+    def get_E_anom_from_theta(self, theta):
+        if self.e_mag < 1 and self.e_mag>0: # Ellipse
+            E = 2*np.arctan(np.tan(theta/2)/np.sqrt((1+self.e_mag)/(1-self.e_mag)))
+            return E
+        else:
+            raise RuntimeError('E anomaly is not a thing for non elliptical orbits you dumbass... Did you mean F anomaly?')
+
+    def get_F_anom_from_theta(self, theta):
+        if self.e_mag > 1: # Hyperbola
+            F = 2*np.arctanh(np.tan(theta/2)/np.sqrt((1+self.e_mag)/(1-self.e_mag)))
+            return F
+        else:
+            raise RuntimeError('F anomaly is not a thing for elliptical orbits you dumbass... Did you mean E anomaly?')
+
+    def get_M_anom_from_theta(self, theta):
+        if self.e_mag < 1 and self.e_mag>0: # Ellipse
+            E = self.get_E_anom_from_theta(theta)
+            M = E - self.e_mag*np.sin(E)
+            return M
+        else:
+            raise RuntimeError(
+                'M anomaly is not a thing for non elliptical orbits you dumbass... Did you mean M_bar anomaly?')
+
+    def get_M_bar_anom_from_theta(self, theta):
+        if self.e_mag > 1: # Hyperbola
+            F = self.get_F_anom_from_theta(theta)
+            M_bar = self.e_mag*np.sinh(F) - F
+            return M_bar
+        else:
+            raise RuntimeError(
+                'M_bar anomaly is not a thing for elliptical orbits you dumbass... Did you mean M anomaly?')
+
+    def get_tp_from_theta(self, theta):
+        if self.e_mag < 1 and self.e_mag>0: # Ellipse
+            M = self.get_M_anom_from_theta(theta)
+            tp = M/self.n
+        elif self.e_mag > 1:
+            M_bar = self.get_M_bar_anom_from_theta(theta)
+            tp = M_bar / self.n_bar
+        return tp
+
+    def get_theta_from_tp(self, tp):
+        def residual(theta):
+            return self.get_tp_from_theta(theta) - tp
+
+        if 0 < self.e_mag < 1:  # Ellipse
+            theta_min = -np.pi
+            theta_max = np.pi
+
+        elif self.e_mag > 1:  # Hyperbola
+            theta_max = np.arccos(-1 / self.e_mag)
+            theta_min = -theta_max
+            eps = 1e-10
+            theta_min += eps
+            theta_max -= eps
+
+        else:
+            raise ValueError("Only elliptical and hyperbolic orbits are supported.")
+
+        return brentq(residual, theta_min, theta_max)
+
+    def get_tp_from_t(self, t):
+        if 0 < self.e_mag < 1:  # Ellipse
+            tp = (t - self.tp_first) % self.T
+
+            # Center the result around periapsis: [-T/2, T/2)
+            if tp > self.T / 2:
+                tp -= self.T
+
+        elif self.e_mag > 1:  # Hyperbola
+            tp = t - self.tp_first
+
+        else:
+            raise ValueError("Only elliptical and hyperbolic orbits are supported.")
+
+        return tp
+
+
+    def get_tp_from_r_v(self, r, v):
+        theta = self.get_theta_from_r_v(r, v)
+        tp = self.get_tp_from_theta(theta)
+        return tp
+
+
+
     def plot_3d(self, n_points=500, max_distance=None,
-                show=True, ax=None, plot_body=True, color='royalblue', time=None):
+                show=True, ax=None, plot_body=True, color='royalblue', time=None, DrawNodes=False, Drawa=False, DrawOrbit=True):
         # THIS IS ALL AI SHENNANIGANS!!!
         # Determine orbit type
         is_elliptic = self.e_mag < 1
@@ -105,12 +212,26 @@ class Orbit():
             fig = ax.figure
 
         # Plot orbit
-        ax.plot(
-            r_3d[0], r_3d[1], r_3d[2],
-            label=self.name,
-            color=color,
-            linewidth=2
-        )
+        if DrawNodes:
+            ax.plot(
+                r_3d[0], r_3d[1], r_3d[2],
+                label=self.name,
+                color=color,
+                linewidth=1
+            )
+
+        if time is not None:
+            tp = self.get_tp_from_t(time)
+            theta_sc = self.get_theta_from_tp(tp)
+            r_sc_mag = self.get_r_mag_from_theta(theta_sc)
+
+            r_sc = r_sc_mag * (
+                np.cos(theta_sc) * p_hat
+                + np.sin(theta_sc) * q_hat
+            )
+
+            ax.scatter(*r_sc, color='black', s=2)
+
         if plot_body:
             # Plot reference body as a sphere
             u = np.linspace(0, 2 * np.pi, 40)
@@ -128,66 +249,69 @@ class Orbit():
                 alpha=0.6,
                 linewidth=0
             )
+        if DrawNodes:
+            # Periapsis
+            rp = self.rp
 
-        # Periapsis
-        rp = self.rp
-
-        ax.scatter(
-            *rp,
-            color='green',
-            s=20,
-            depthshade=False
-        )
-
-        ax.text(
-            *rp,
-            ' Pe',
-            color='green',
-            fontsize=10,
-            fontweight='bold'
-        )
-
-        # Major axis
-        if is_elliptic:
-            ra = self.ra
-
-            ax.plot(
-                [rp[0], ra[0]],
-                [rp[1], ra[1]],
-                [rp[2], ra[2]],
-                linestyle=':',
-                color='black',
-                linewidth=1.5
-            )
-
-            # Apoapsis
             ax.scatter(
-                *ra,
-                color='red',
-                s=20,
+                *rp,
+                color='green',
+                s=10,
                 depthshade=False
             )
 
             ax.text(
-                *ra,
-                ' Ap',
-                color='red',
+                *rp,
+                ' Pe',
+                color='green',
                 fontsize=10,
                 fontweight='bold'
             )
 
+        # Major axis
+
+        if is_elliptic:
+            if Drawa:
+                ra = self.ra
+
+                ax.plot(
+                    [rp[0], ra[0]],
+                    [rp[1], ra[1]],
+                    [rp[2], ra[2]],
+                    linestyle=':',
+                    color='black',
+                    linewidth=1.5
+                )
+            if DrawNodes:
+                # Apoapsis
+                ax.scatter(
+                    *ra,
+                    color='red',
+                    s=10,
+                    depthshade=False
+                )
+
+                ax.text(
+                    *ra,
+                    ' Ap',
+                    color='red',
+                    fontsize=10,
+                    fontweight='bold'
+                )
+
         else:
             # Major axis for hyperbolic orbit
-            axis_length = max_distance
+            if Drawa:
+                axis_length = max_distance
 
-            ax.plot(
-                [-axis_length * p_hat[0], axis_length * p_hat[0]],
-                [-axis_length * p_hat[1], axis_length * p_hat[1]],
-                [-axis_length * p_hat[2], axis_length * p_hat[2]],
-                linestyle=':',
-                color='black',
-                linewidth=1.5
-            )
+                ax.plot(
+                    [-axis_length * p_hat[0], axis_length * p_hat[0]],
+                    [-axis_length * p_hat[1], axis_length * p_hat[1]],
+                    [-axis_length * p_hat[2], axis_length * p_hat[2]],
+                    linestyle=':',
+                    color='black',
+                    linewidth=1.5
+                )
 
         # Reference body center
         ax.scatter(0, 0, 0, color='black', s=15)
