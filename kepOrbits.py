@@ -19,19 +19,22 @@ class Body():
 Earth = Body(csts.M_Earth, csts.R_Earth, np.array([0,0,0]), np.array([0,0,0]), 0, rot_velocity=(2*np.pi/csts.SID_DAY))
 
 class Orbit():
-    def __init__(self, r0:np.ndarray, v0:np.ndarray, t0, ref_body, name="Unamed Orbit"):
+    def __init__(self, refbody, name="Unamed Orbit"):
+        self.refbody = refbody
         self.name = name
+        self.mu = refbody.mu
+    def from_r0_v0_t0(self, r0:np.ndarray, v0:np.ndarray, t0:float):
 
         self.H_vec = np.cross(r0, v0)
         self.H_mag=np.linalg.norm(self.H_vec)
-        self.mu = ref_body.mu
-        self.ref_body = ref_body
         v0_mag = np.linalg.norm(v0)
         r0_mag = np.linalg.norm(r0)
         self.e_vec =  (1/self.mu) * ((v0_mag**2 - self.mu/r0_mag)*r0 - np.dot(r0, v0)*v0)
         self.e_mag = np.linalg.norm(self.e_vec)
 
         self.rp_unit = (1/self.e_mag) * self.e_vec
+
+        self.get_orientation_from_H()
 
         self.p = (self.H_mag**2)/self.mu
 
@@ -55,7 +58,106 @@ class Orbit():
         self.v0 = v0
         self.t0 = t0
 
+        self.theta_0 = self.get_theta_from_r_v(r0,v0)
+
         self.tp_first = self.get_tp_from_r_v(r0,v0)
+
+    def from_orbital_elements(self, a, e_mag, theta_0, i, raan, argp, t0):
+        self.a = a
+        self.e_mag = e_mag
+        self.i = i
+        self.raan = raan
+        self.argp = argp
+        self.theta_0 = theta_0
+
+        self.e_vec = self.e_mag * np.array([
+            np.cos(raan) * np.cos(argp) - np.sin(raan) * np.sin(argp) * np.cos(i),
+
+            np.sin(raan) * np.cos(argp) + np.cos(raan) * np.sin(argp) * np.cos(i),
+
+            np.sin(argp) * np.sin(i)
+        ])
+        self.rp_unit = (1 / self.e_mag) * self.e_vec
+        self.get_H_from_elements()
+
+        self.r0, self.v0 = self.get_r_v_from_theta(theta_0)
+
+        self.p = (self.H_mag**2)/self.mu
+
+        self.rp_mag = self.get_r_mag_from_theta(0)
+        self.ra_mag = self.get_r_mag_from_theta(np.pi)
+
+        self.a = (self.rp_mag + self.ra_mag) /2
+
+        self.rp = self.rp_mag * self.rp_unit
+        self.ra = self.ra_mag * self.rp_unit * -1
+
+        if self.e_mag < 1 and self.e_mag > 0:  # Ellipse
+            self.T = 2*np.pi*np.sqrt((self.a**3)/self.mu)
+            self.n = 2*np.pi/self.T
+        elif self.e_mag > 1:
+            self.n_bar = np.sqrt(self.mu/(-self.a**3))
+            self.T = np.inf
+
+        self.t0 = t0
+
+        self.tp_first = self.get_tp_from_r_v(self.r0, self.v0)
+
+
+
+
+
+    def get_orientation_from_H(self):
+        H = np.asarray(self.H_vec, dtype=float)
+        rp = np.asarray(self.rp_unit, dtype=float)
+
+        H_norm = np.linalg.norm(H)
+        H_hat = H / H_norm
+
+        # Inclination
+        self.i = np.arccos(np.clip(H_hat[2], -1.0, 1.0))
+
+        # Ascending node vector
+        N = np.cross([0.0, 0.0, 1.0], H)
+        N_norm = np.linalg.norm(N)
+
+        if N_norm > 1e-12:
+            N_hat = N / N_norm
+
+            # Right ascension of the ascending node
+            self.raan = np.arctan2(N[1], N[0]) % (2 * np.pi)
+
+            # Argument of periapsis
+            self.argp = np.arctan2(
+                np.dot(H_hat, np.cross(N_hat, rp)),
+                np.dot(N_hat, rp)
+            ) % (2 * np.pi)
+
+        else:
+            # Equatorial orbit: RAAN is undefined.
+            self.raan = np.nan
+            self.argp = np.nan
+
+
+    def get_H_from_elements(self):
+        a = self.a
+        e = self.e_mag
+        i = self.i
+        mu = self.mu
+        raan = self.raan
+
+        # Angular momentum magnitude
+        self.H_mag = np.sqrt(mu * a * (1.0 - e ** 2))
+
+        # Angular momentum vector in the inertial frame
+        self.H_vec = self.H_mag * np.array([
+            np.sin(raan) * np.sin(i),
+            -np.cos(raan) * np.sin(i),
+            np.cos(i)
+        ])
+
+        return self.H_vec
+
 
 
     def get_r_mag_from_theta(self, theta):
@@ -69,6 +171,37 @@ class Orbit():
         if v_radial < 0:
             theta *= -1
         return theta
+
+    def get_r_v_from_theta(self, theta):
+        r_mag = self.get_r_mag_from_theta(theta)
+
+        u = self.argp + theta
+
+        r_vec = r_mag * np.array([
+            np.cos(self.raan) * np.cos(u)
+            - np.sin(self.raan) * np.sin(u) * np.cos(self.i),
+
+            np.sin(self.raan) * np.cos(u)
+            + np.cos(self.raan) * np.sin(u) * np.cos(self.i),
+
+            np.sin(u) * np.sin(self.i)
+        ])
+
+        H_hat = self.H_vec / np.linalg.norm(self.H_vec)
+
+        r_hat = r_vec / r_mag
+
+        t_hat = np.cross(H_hat, r_hat)
+
+        e = self.e_mag
+        p = self.a * (1.0 - e ** 2)
+
+        v_r = np.sqrt(self.mu / p) * e * np.sin(theta)
+        v_t = np.linalg.norm(self.H_vec) / r_mag
+
+        v_vec = v_r * r_hat + v_t * t_hat
+
+        return r_vec, v_vec
 
     def get_theta_from_r_mag(self, r_mag):
         theta = np.arccos(((self.p/r_mag)-1)/self.e_mag)
@@ -212,7 +345,7 @@ class Orbit():
             fig = ax.figure
 
         # Plot orbit
-        if DrawNodes:
+        if DrawOrbit:
             ax.plot(
                 r_3d[0], r_3d[1], r_3d[2],
                 label=self.name,
@@ -221,7 +354,7 @@ class Orbit():
             )
 
         if time is not None:
-            tp = self.get_tp_from_t(time)
+            tp = self.get_tp_from_t(time-self.t0)
             theta_sc = self.get_theta_from_tp(tp)
             r_sc_mag = self.get_r_mag_from_theta(theta_sc)
 

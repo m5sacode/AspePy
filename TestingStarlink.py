@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 # AI testing code
 
 
-n_sats = 2000
+n_sats = 1000
 url = "https://celestrak.org/NORAD/elements/gp.php?NAME=STARLINK&FORMAT=TLE"
 
 response = requests.get(url, timeout=60)

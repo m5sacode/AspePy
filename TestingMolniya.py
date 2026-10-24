@@ -136,6 +136,8 @@ for i, (name, orbit) in enumerate(orbits):
     orbit.plot_3d(
         show=False,
         ax=ax,
+        Drawa=True,
+        DrawNodes=True,
         plot_body=(i == 0),
         time=0,
         color=colors[i % len(colors)]
