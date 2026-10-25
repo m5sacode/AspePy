@@ -7,16 +7,16 @@ from scipy.optimize import brentq
 mpl.use('TkAgg')
 
 class Body():
-    def __init__(self, mass, radius, r0:np.ndarray, v0:np.ndarray, t0, rot_velocity=0, ref_body=None):
+    def __init__(self, mass, radius,  rot_velocity=0, orbit=None):
         self.mass = mass
         self.radius = radius
-        self.ref_body = ref_body
-        self.r0 = r0
-        self.v0 = v0
+        if orbit is not None:
+            self.refbody = orbit.refbody
+        self.orbit = orbit
         self.mu = csts.G * mass
         self.omega = rot_velocity
 
-Earth = Body(csts.M_Earth, csts.R_Earth, np.array([0,0,0]), np.array([0,0,0]), 0, rot_velocity=(2*np.pi/csts.SID_DAY))
+
 
 class Orbit():
     def __init__(self, refbody, name="Unamed Orbit"):
@@ -69,6 +69,8 @@ class Orbit():
         self.raan = raan
         self.argp = argp
         self.theta_0 = theta_0
+
+        self.p = a* (1- e_mag**2)
 
         self.e_vec = self.e_mag * np.array([
             np.cos(raan) * np.cos(argp) - np.sin(raan) * np.sin(argp) * np.cos(i),
@@ -293,7 +295,7 @@ class Orbit():
 
 
     def plot_3d(self, n_points=500, max_distance=None,
-                show=True, ax=None, plot_body=True, color='royalblue', time=None, DrawNodes=False, Drawa=False, DrawOrbit=True):
+                show=True, ax=None, plot_body=True, color='royalblue', time=None, DrawNodes=False, Drawa=False, DrawOrbit=True, DrawSphereRadius=None):
         # THIS IS ALL AI SHENNANIGANS!!!
         # Determine orbit type
         is_elliptic = self.e_mag < 1
@@ -364,13 +366,29 @@ class Orbit():
             )
 
             ax.scatter(*r_sc, color='black', s=2)
+            if DrawSphereRadius is not None:
+                u = np.linspace(0, 2 * np.pi, 40)
+                v = np.linspace(0, np.pi, 20)
+
+                radius = DrawSphereRadius
+
+                x_sphere = radius * np.outer(np.cos(u), np.sin(v)) + r_sc[0]
+                y_sphere = radius * np.outer(np.sin(u), np.sin(v)) + r_sc[1]
+                z_sphere = radius * np.outer(np.ones_like(u), np.cos(v)) + r_sc[2]
+
+                ax.plot_surface(
+                    x_sphere, y_sphere, z_sphere,
+                    color='grey',
+                    alpha=0.6,
+                    linewidth=0
+                )
 
         if plot_body:
             # Plot reference body as a sphere
             u = np.linspace(0, 2 * np.pi, 40)
             v = np.linspace(0, np.pi, 20)
 
-            radius = self.ref_body.radius
+            radius = self.refbody.radius
 
             x_sphere = radius * np.outer(np.cos(u), np.sin(v))
             y_sphere = radius * np.outer(np.sin(u), np.sin(v))
@@ -448,7 +466,7 @@ class Orbit():
 
         # Reference body center
         ax.scatter(0, 0, 0, color='black', s=15)
-        radius = self.ref_body.radius
+        radius = self.refbody.radius
 
         # Set equal scaling
         if is_elliptic:
@@ -477,3 +495,11 @@ class Orbit():
             plt.show()
 
         return fig, ax
+
+Earth = Body(csts.M_Earth, csts.R_Earth, rot_velocity=(2*np.pi/csts.SID_DAY))
+Moon_Orbit = Orbit(Earth, name="Moon Orbit")
+Moon_Orbit.from_orbital_elements(0.384401e9, 0.055, 0, 0, np.radians(5.1454), np.radians(330.12), np.radians(148.23))
+Moon = Body(csts.M_Moon, csts.R_Moon, orbit=Moon_Orbit)
+
+# Moon_Orbit.plot_3d(DrawSphereRadius=Moon.radius, time=0)
+
